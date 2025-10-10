@@ -6,40 +6,40 @@
     harbor_version: "v2.9.0"
     harbor_installer_url: "https://github.com/goharbor/harbor/releases/download/{{ harbor_version }}/harbor-online-install-{{ harbor_version }}.tgz"
     harbor_tmp_dir: "/tmp/harbor"
-  
+
   tasks:
     - name: Download Harbor online installer
       ansible.builtin.get_url:
         url: "{{ harbor_installer_url }}"
         dest: "/tmp/harbor-online-install-{{ harbor_version }}.tgz"
         mode: '0644'
-      
+
     - name: Extract Harbor installer to /tmp
       ansible.builtin.unarchive:
         src: "/tmp/harbor-online-install-{{ harbor_version }}.tgz"
         dest: "/tmp"
         remote_src: yes
         creates: "{{ harbor_tmp_dir }}"
-    
+
     - name: Create /data directory with SELinux context
       ansible.builtin.file:
         path: /data
         state: directory
         mode: '0755'
         setype: container_file_t
-    
+
     - name: Create /data/cert directory
       ansible.builtin.file:
         path: /data/cert
         state: directory
         mode: '0755'
-    
+
     - name: Create /data/common/config directory
       ansible.builtin.file:
         path: /data/common/config
         state: directory
         mode: '0755'
-    
+
     - name: Copy harbor.yml.tmpl to harbor.yml
       ansible.builtin.copy:
         src: "{{ harbor_tmp_dir }}/harbor.yml.tmpl"
