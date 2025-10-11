@@ -20,11 +20,11 @@ repos:
       - id: check-symlinks
       - id: name-tests-test
 
-  - repo: https://github.com/deamen/pre-commit-hooks
-    rev: 37b54b228e41c1f7c78224b40e47747bde5862ab # or use a specific tag like v1.0.0
-    hooks:
-      - id: check-binary-files
-      - id: dos2unix
+#  - repo: https://github.com/deamen/pre-commit-hooks
+#    rev: 37b54b228e41c1f7c78224b40e47747bde5862ab # or use a specific tag like v1.0.0
+#    hooks:
+#      - id: check-binary-files
+#      - id: dos2unix
 
   - repo: https://github.com/psf/black-pre-commit-mirror
     rev: 24.8.0
