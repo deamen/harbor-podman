@@ -25,7 +25,10 @@ try:
     from ruamel.yaml.comments import CommentedMap
     from ruamel.yaml.scalarstring import SingleQuotedScalarString
 except Exception as exc:
-    print("This script requires 'ruamel.yaml'. Install with: pip install -r requirements.txt", file=sys.stderr)
+    print(
+        "This script requires 'ruamel.yaml'. Install with: pip install -r requirements.txt",
+        file=sys.stderr,
+    )
     raise
 
 
@@ -49,10 +52,26 @@ def sanitize_rotate_size(size: str) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Patch docker-compose.yml logging for podman using harbor.yml")
-    parser.add_argument("-c", "--compose", default="docker-compose.yml", help="Path to docker-compose.yml to patch")
-    parser.add_argument("-y", "--harbor", default="harbor.yml", help="Path to harbor.yml to read log settings from")
-    parser.add_argument("--backup", action="store_true", help="Save a backup of the original compose file as .bak")
+    parser = argparse.ArgumentParser(
+        description="Patch docker-compose.yml logging for podman using harbor.yml"
+    )
+    parser.add_argument(
+        "-c",
+        "--compose",
+        default="docker-compose.yml",
+        help="Path to docker-compose.yml to patch",
+    )
+    parser.add_argument(
+        "-y",
+        "--harbor",
+        default="harbor.yml",
+        help="Path to harbor.yml to read log settings from",
+    )
+    parser.add_argument(
+        "--backup",
+        action="store_true",
+        help="Save a backup of the original compose file as .bak",
+    )
     args = parser.parse_args()
 
     compose_path = os.path.abspath(args.compose)
@@ -78,12 +97,18 @@ def main() -> int:
     location = log_cfg.get("location", "")
 
     if not location:
-        print("Warning: harbor.yml does not define log.local.location; 'path' option will be set to '/var/log' by default.")
+        print(
+            "Warning: harbor.yml does not define log.local.location; 'path' option will be set to '/var/log' by default."
+        )
         location = "/var/log"
     if not rotate_size:
-        print("Warning: harbor.yml does not define log.local.rotate_size; 'max-size' will be left empty.")
+        print(
+            "Warning: harbor.yml does not define log.local.rotate_size; 'max-size' will be left empty."
+        )
     if rotate_count in (None, ""):
-        print("Warning: harbor.yml does not define log.local.rotate_count; 'max-file' will be left empty.")
+        print(
+            "Warning: harbor.yml does not define log.local.rotate_count; 'max-file' will be left empty."
+        )
 
     compose = load_yaml(compose_path) or {}
     services = compose.get("services") or CommentedMap()
@@ -141,7 +166,7 @@ def main() -> int:
             original_tag = str(tag_val)
 
         # Build path: <location>/<original_tag>.log
-        path_val = os.path.join(location.rstrip('/'), f"{original_tag}.log")
+        path_val = os.path.join(location.rstrip("/"), f"{original_tag}.log")
         opts["path"] = path_val
 
         if rotate_size:
