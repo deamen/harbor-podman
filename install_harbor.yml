@@ -1,48 +1,163 @@
 ---
 - name: Install Harbor
   hosts: localhost
-  become: yes
+  connection: local
+  become: true
   vars:
-    harbor_version: "v2.9.0"
-    harbor_installer_url: "https://github.com/goharbor/harbor/releases/download/{{ harbor_version }}/harbor-online-install-{{ harbor_version }}.tgz"
-    harbor_tmp_dir: "/tmp/harbor"
+    harbor_version: "v2.14.0"
+    harbor_home_dir: "/opt/harbor"
+    harbor_installer_url: "https://github.com/goharbor/harbor/releases/download/{{ harbor_version }}/harbor-online-installer-{{ harbor_version }}.tgz"
+    harbor_installer_dir: "{{ harbor_home_dir }}/{{ harbor_version }}"
+    harbor_data_dir: "{{ harbor_home_dir }}/data"
+    harbor_cert_dir: "{{ harbor_data_dir }}/cert"
+    harbor_config_dir: "{{ harbor_installer_dir }}/harbor/common/config"
 
   tasks:
+    - name: Install podman packages
+      ansible.builtin.package:
+        name:
+          - podman
+          - podman-docker
+          - podman-compose
+          - python3-ruamel-yaml
+        state: present
+
+    - name: Create harbor directory with SELinux context
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+        setype: container_file_t
+      loop:
+        - "{{ harbor_data_dir }}"
+        - "{{ harbor_cert_dir }}"
+        - "{{ harbor_config_dir }}"
+
     - name: Download Harbor online installer
       ansible.builtin.get_url:
         url: "{{ harbor_installer_url }}"
         dest: "/tmp/harbor-online-install-{{ harbor_version }}.tgz"
-        mode: '0644'
+        mode: "0644"
 
     - name: Extract Harbor installer to /tmp
       ansible.builtin.unarchive:
         src: "/tmp/harbor-online-install-{{ harbor_version }}.tgz"
-        dest: "/tmp"
-        remote_src: yes
-        creates: "{{ harbor_tmp_dir }}"
+        dest: "{{ harbor_installer_dir }}"
+        remote_src: true
+#        creates: "{{ harbor_installer_dir }}"
 
-    - name: Create /data directory with SELinux context
+    - name: Create harbor cert directory
       ansible.builtin.file:
-        path: /data
+        path: "{{ harbor_cert_dir }}"
         state: directory
-        mode: '0755'
-        setype: container_file_t
+        mode: "0755"
 
-    - name: Create /data/cert directory
+    - name: Create harbor config directory
       ansible.builtin.file:
-        path: /data/cert
+        path: "{{ harbor_config_dir }}"
         state: directory
-        mode: '0755'
-
-    - name: Create /data/common/config directory
-      ansible.builtin.file:
-        path: /data/common/config
-        state: directory
-        mode: '0755'
+        mode: "0755"
 
     - name: Copy harbor.yml.tmpl to harbor.yml
       ansible.builtin.copy:
-        src: "{{ harbor_tmp_dir }}/harbor.yml.tmpl"
-        dest: "{{ harbor_tmp_dir }}/harbor.yml"
-        remote_src: yes
-        mode: '0644'
+        src: "{{ harbor_installer_dir }}/harbor/harbor.yml.tmpl"
+        dest: "{{ harbor_installer_dir }}/harbor/harbor.yml"
+        remote_src: true
+        mode: "0644"
+
+    - name: Update hostname in harbor.yml
+      ansible.builtin.lineinfile:
+        path: "{{ harbor_installer_dir }}/harbor/harbor.yml"
+        regexp: '^hostname:.*'
+        line: "hostname: {{ ansible_hostname }}"
+
+    - name: Update data_volume in harbor.yml
+      ansible.builtin.lineinfile:
+        path: "{{ harbor_installer_dir }}/harbor/harbor.yml"
+        regexp: '^data_volume:.*'
+        line: "data_volume: {{ harbor_data_dir }}"
+
+    - name: Update certificate path in harbor.yml
+      ansible.builtin.lineinfile:
+        path: "{{ harbor_installer_dir }}/harbor/harbor.yml"
+        regexp: '^  certificate:.*'
+        line: "  certificate: {{ harbor_cert_dir }}/harbor.crt"
+
+    - name: Update private_key path in harbor.yml
+      ansible.builtin.lineinfile:
+        path: "{{ harbor_installer_dir }}/harbor/harbor.yml"
+        regexp: '^  private_key:.*'
+        line: "  private_key: {{ harbor_cert_dir }}/harbor.key"
+
+    - name: Update harbor_admin_password in harbor.yml
+      ansible.builtin.lineinfile:
+        path: "{{ harbor_installer_dir }}/harbor/harbor.yml"
+        regexp: '^harbor_admin_password:.*'
+        line: "harbor_admin_password: \"{{ lookup('pipe', 'openssl rand -base64 30') }}\""
+
+    - name: Update database password in harbor.yml
+      ansible.builtin.lineinfile:
+        path: "{{ harbor_installer_dir }}/harbor/harbor.yml"
+        regexp: '^  password:.*'
+        line: "  password: \"{{ lookup('pipe', 'openssl rand -base64 30') }}\""
+
+    - name: Ensure 'patch' utility is installed
+      ansible.builtin.package:
+        name: patch
+        state: present
+    - name: Check if harbor.crt exists
+      ansible.builtin.stat:
+        path: "{{ harbor_cert_dir }}/harbor.crt"
+      register: harbor_cert_stat
+
+    - name: Check if harbor.key exists
+      ansible.builtin.stat:
+        path: "{{ harbor_cert_dir }}/harbor.key"
+      register: harbor_key_stat
+
+    - name: Generate certs if missing
+      ansible.builtin.include_tasks:
+        file: tasks/generate_cert_tasks.yml
+      when: not (harbor_cert_stat.stat.exists and harbor_key_stat.stat.exists)
+    - name: Patch common.sh to support podman
+      ansible.posix.patch:
+        src: "{{ playbook_dir }}/files/common_sh.patch"
+        dest: "{{ harbor_installer_dir }}/harbor/common.sh"
+
+    - name: Patch install.sh to support podman
+      ansible.posix.patch:
+        src: "{{ playbook_dir }}/files/install_sh.patch"
+        dest: "{{ harbor_installer_dir }}/harbor/install.sh"
+
+    - name: Comment out Harbor start lines in install.sh (creates a backup)
+      ansible.builtin.replace:
+        path: "{{ harbor_installer_dir }}/harbor/install.sh"
+        regexp: '^\s*(h2 "\[Step \$item\]: starting Harbor \.\.\."|\$DOCKER_COMPOSE up -d)'
+        replace: '# \\1'
+        backup: true
+
+    - name: Run Harbor installer script
+      ansible.builtin.command:
+        cmd: "./install.sh --with-trivy --with-podman"
+        chdir: "{{ harbor_installer_dir }}/harbor/"
+      changed_when: false
+
+    - name: Patch docker-compose.yml for podman logging
+      ansible.builtin.command:
+        cmd: >-
+          python3 {{ playbook_dir }}/files/patch_compose.py
+          -c {{ harbor_installer_dir }}/harbor/docker-compose.yml
+          -y {{ harbor_installer_dir }}/harbor/harbor.yml
+          --backup
+        chdir: "{{ playbook_dir }}"
+      register: patch_compose_result
+      failed_when: patch_compose_result.rc != 0
+      changed_when: "'Patched compose file' in (patch_compose_result.stdout | default(''))"
+
+    - name: Start Harbor with podman compose
+      ansible.builtin.command:
+        cmd: "podman compose up -d"
+        chdir: "{{ harbor_installer_dir }}/harbor/"
+      register: podman_compose_result
+      failed_when: podman_compose_result.rc != 0
+      changed_when: false
