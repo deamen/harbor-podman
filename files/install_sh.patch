@@ -3,7 +3,7 @@ index c463facd9..ee1ff065c 100755
 --- a/install.sh
 +++ b/install.sh
 @@ -9,6 +9,7 @@ set +o noglob
- 
+
  usage=$'Please set hostname and other necessary attributes in harbor.yml first. DO NOT use localhost or 127.0.0.1 for hostname, because Harbor needs to be accessed by external clients.
  Please set --with-trivy if needs enable Trivy in Harbor.
 +Please set --with-podman if you want to force prepare to treat the Docker CLI as Podman.
@@ -16,7 +16,7 @@ index c463facd9..ee1ff065c 100755
  with_trivy=$false
 +# podman option not enabled by default
 +with_podman=$false
- 
+
  # flag to using docker compose v1 or v2, default would using v1 docker-compose
  DOCKER_COMPOSE=docker-compose
 @@ -28,6 +31,8 @@ while [ $# -gt 0 ]; do
@@ -30,14 +30,14 @@ index c463facd9..ee1ff065c 100755
              exit 1;;
 @@ -65,12 +70,17 @@ then
  fi
- 
+
  ./prepare $prepare_para
 +
  echo ""
- 
+
 -if [ -n "$DOCKER_COMPOSE ps -q"  ]
 -    then
--        note "stopping existing Harbor instance ..." 
+-        note "stopping existing Harbor instance ..."
 -        $DOCKER_COMPOSE down -v
 +# Check if any containers started by compose are present. Capture the compose
 +# output and filter to only valid container IDs so vendor warnings (for
@@ -49,4 +49,3 @@ index c463facd9..ee1ff065c 100755
 +    $DOCKER_COMPOSE down -v
  fi
  echo ""
- 

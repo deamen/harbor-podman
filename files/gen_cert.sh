@@ -40,4 +40,3 @@ sudo openssl req -newkey rsa:4096 -nodes -x509 -days 30 \
         -out "$OUT"
 
 echo "Generated certificate: $OUT and key: $KEYOUT"
-
