@@ -10,7 +10,7 @@
 #      path to the harbor.yml file.
 #   2) Else if the environment variable HARBOR_YML is set it will be used.
 #   3) Otherwise the script falls back to $DATA_VOLUME/harbor.yml as before.
-set -e 
+set -e
 show_help() {
     cat <<EOF
 Usage: $0 [HARBOR_YML_PATH]

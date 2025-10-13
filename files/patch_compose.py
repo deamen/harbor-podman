@@ -50,6 +50,7 @@ def sanitize_rotate_size(size: str) -> str:
     # Accept values like '200M' or '100k' and return them unchanged.
     return str(size)
 
+
 def should_prefix_docker_io(image: str) -> bool:
     """Return True if the image should be prefixed with 'docker.io/'.
 
@@ -76,6 +77,7 @@ def should_prefix_docker_io(image: str) -> bool:
         return True
     except Exception:
         return False
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(
