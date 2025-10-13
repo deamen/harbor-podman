@@ -10,9 +10,20 @@
     harbor_installer_dir: "{{ harbor_home_dir }}/{{ harbor_version }}"
     harbor_data_dir: "{{ harbor_home_dir }}/data"
     harbor_cert_dir: "{{ harbor_data_dir }}/cert"
-    harbor_config_dir: "{{ harbor_installer_dir }}/harbor/common/config"
+    harbor_config_dir: "{{ harbor_installer_dir }}/common/config"
+    ut_test: true  # Set to true to enable unit testing
 
   tasks:
+    - name: Check if harbor_home_dir exists
+      ansible.builtin.stat:
+        path: "{{ harbor_home_dir }}"
+      register: harbor_home_stat
+
+    - name: Check if docker-compose.yml exists
+      ansible.builtin.stat:
+        path: "{{ harbor_installer_dir }}/docker-compose.yml"
+      register: harbor_compose_stat
+
     - name: Install podman packages
       ansible.builtin.package:
         name:
@@ -21,6 +32,22 @@
           - podman-compose
           - python3-ruamel-yaml
         state: present
+
+    - name: Stop existing Harbor with podman compose
+      ansible.builtin.command:
+        cmd: "podman compose down"
+        chdir: "{{ harbor_installer_dir }}/"
+      register: podman_compose_result
+      failed_when: podman_compose_result.rc != 0
+      changed_when: false
+      when: ut_test and (harbor_home_stat is defined and harbor_home_stat.stat.exists) and (harbor_compose_stat is defined and harbor_compose_stat.stat.exists)
+
+
+    - name: Remove existing Harbor home directory
+      ansible.builtin.file:
+        path: "{{ harbor_home_dir }}"
+        state: absent
+      when: ut_test and (harbor_home_stat is defined and harbor_home_stat.stat.exists)
 
     - name: Create harbor directory with SELinux context
       ansible.builtin.file:
@@ -33,6 +60,12 @@
         - "{{ harbor_cert_dir }}"
         - "{{ harbor_config_dir }}"
 
+    - name:  Set default SELinux fcontext for harbor_home_dir
+      community.general.sefcontext:
+        target: '{{ harbor_home_dir }}(/.*)?'
+        setype: container_file_t
+        state: present
+
     - name: Download Harbor online installer
       ansible.builtin.get_url:
         url: "{{ harbor_installer_url }}"
@@ -42,9 +75,19 @@
     - name: Extract Harbor installer to /tmp
       ansible.builtin.unarchive:
         src: "/tmp/harbor-online-install-{{ harbor_version }}.tgz"
-        dest: "{{ harbor_installer_dir }}"
+        dest: "/tmp/"
         remote_src: true
-#        creates: "{{ harbor_installer_dir }}"
+
+    - name: Copy extracted Harbor installer to installer dir
+      ansible.builtin.copy:
+        src: /tmp/harbor/
+        dest: "{{ harbor_installer_dir }}/"
+        setype: container_file_t
+        remote_src: true
+        owner: root
+        group: root
+        mode: preserve
+      when: not (harbor_installer_dir is directory and (harbor_installer_dir + '/harbor.yml.tmpl') is file)
 
     - name: Create harbor cert directory
       ansible.builtin.file:
@@ -60,44 +103,44 @@
 
     - name: Copy harbor.yml.tmpl to harbor.yml
       ansible.builtin.copy:
-        src: "{{ harbor_installer_dir }}/harbor/harbor.yml.tmpl"
-        dest: "{{ harbor_installer_dir }}/harbor/harbor.yml"
+        src: "{{ harbor_installer_dir }}/harbor.yml.tmpl"
+        dest: "{{ harbor_installer_dir }}/harbor.yml"
         remote_src: true
         mode: "0644"
 
     - name: Update hostname in harbor.yml
       ansible.builtin.lineinfile:
-        path: "{{ harbor_installer_dir }}/harbor/harbor.yml"
+        path: "{{ harbor_installer_dir }}/harbor.yml"
         regexp: '^hostname:.*'
         line: "hostname: {{ ansible_hostname }}"
 
     - name: Update data_volume in harbor.yml
       ansible.builtin.lineinfile:
-        path: "{{ harbor_installer_dir }}/harbor/harbor.yml"
+        path: "{{ harbor_installer_dir }}/harbor.yml"
         regexp: '^data_volume:.*'
         line: "data_volume: {{ harbor_data_dir }}"
 
     - name: Update certificate path in harbor.yml
       ansible.builtin.lineinfile:
-        path: "{{ harbor_installer_dir }}/harbor/harbor.yml"
+        path: "{{ harbor_installer_dir }}/harbor.yml"
         regexp: '^  certificate:.*'
         line: "  certificate: {{ harbor_cert_dir }}/harbor.crt"
 
     - name: Update private_key path in harbor.yml
       ansible.builtin.lineinfile:
-        path: "{{ harbor_installer_dir }}/harbor/harbor.yml"
+        path: "{{ harbor_installer_dir }}/harbor.yml"
         regexp: '^  private_key:.*'
         line: "  private_key: {{ harbor_cert_dir }}/harbor.key"
 
     - name: Update harbor_admin_password in harbor.yml
       ansible.builtin.lineinfile:
-        path: "{{ harbor_installer_dir }}/harbor/harbor.yml"
+        path: "{{ harbor_installer_dir }}/harbor.yml"
         regexp: '^harbor_admin_password:.*'
         line: "harbor_admin_password: \"{{ lookup('pipe', 'openssl rand -base64 30') }}\""
 
     - name: Update database password in harbor.yml
       ansible.builtin.lineinfile:
-        path: "{{ harbor_installer_dir }}/harbor/harbor.yml"
+        path: "{{ harbor_installer_dir }}/harbor.yml"
         regexp: '^  password:.*'
         line: "  password: \"{{ lookup('pipe', 'openssl rand -base64 30') }}\""
 
@@ -122,16 +165,23 @@
     - name: Patch common.sh to support podman
       ansible.posix.patch:
         src: "{{ playbook_dir }}/files/common_sh.patch"
-        dest: "{{ harbor_installer_dir }}/harbor/common.sh"
+        dest: "{{ harbor_installer_dir }}/common.sh"
 
     - name: Patch install.sh to support podman
       ansible.posix.patch:
         src: "{{ playbook_dir }}/files/install_sh.patch"
-        dest: "{{ harbor_installer_dir }}/harbor/install.sh"
+        dest: "{{ harbor_installer_dir }}/install.sh"
+
+    - name: Replace prepare image path to include docker.io
+      ansible.builtin.replace:
+        path: "{{ harbor_installer_dir }}/prepare"
+        regexp: 'goharbor/prepare:{{ harbor_version }} prepare \$@'
+        replace: 'docker.io/goharbor/prepare:{{ harbor_version }} prepare $@'
+        backup: true
 
     - name: Comment out Harbor start lines in install.sh (creates a backup)
       ansible.builtin.replace:
-        path: "{{ harbor_installer_dir }}/harbor/install.sh"
+        path: "{{ harbor_installer_dir }}/install.sh"
         regexp: '^\s*(h2 "\[Step \$item\]: starting Harbor \.\.\."|\$DOCKER_COMPOSE up -d)'
         replace: '# \\1'
         backup: true
@@ -139,25 +189,40 @@
     - name: Run Harbor installer script
       ansible.builtin.command:
         cmd: "./install.sh --with-trivy --with-podman"
-        chdir: "{{ harbor_installer_dir }}/harbor/"
+        chdir: "{{ harbor_installer_dir }}/"
       changed_when: false
 
     - name: Patch docker-compose.yml for podman logging
       ansible.builtin.command:
         cmd: >-
           python3 {{ playbook_dir }}/files/patch_compose.py
-          -c {{ harbor_installer_dir }}/harbor/docker-compose.yml
-          -y {{ harbor_installer_dir }}/harbor/harbor.yml
+          -c {{ harbor_installer_dir }}/docker-compose.yml
+          -y {{ harbor_installer_dir }}/harbor.yml
           --backup
         chdir: "{{ playbook_dir }}"
       register: patch_compose_result
       failed_when: patch_compose_result.rc != 0
       changed_when: "'Patched compose file' in (patch_compose_result.stdout | default(''))"
 
+    - name: Restore SELinux context to files under harbor_home_dir
+      ansible.builtin.command:
+        cmd: "restorecon -R -v '{{ harbor_home_dir }}'"
+      register: restorecon_result
+      changed_when: restorecon_result.rc == 0 and (restorecon_result.stdout | default('')) != ''
+
     - name: Start Harbor with podman compose
       ansible.builtin.command:
         cmd: "podman compose up -d"
-        chdir: "{{ harbor_installer_dir }}/harbor/"
+        chdir: "{{ harbor_installer_dir }}/"
       register: podman_compose_result
       failed_when: podman_compose_result.rc != 0
       changed_when: false
+
+    - name: Run unit test image push script
+      ansible.builtin.command:
+        cmd: "bash {{ playbook_dir }}/files/ut_push.sh {{ harbor_installer_dir }}/harbor.yml"
+        chdir: "{{ harbor_installer_dir }}/"
+      register: ut_push_result
+      failed_when: false
+      changed_when: "'Image pushed successfully' in (ut_push_result.stdout | default(''))"
+      when: ut_test
