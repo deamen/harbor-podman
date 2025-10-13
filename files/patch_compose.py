@@ -50,6 +50,32 @@ def sanitize_rotate_size(size: str) -> str:
     # Accept values like '200M' or '100k' and return them unchanged.
     return str(size)
 
+def should_prefix_docker_io(image: str) -> bool:
+    """Return True if the image should be prefixed with 'docker.io/'.
+
+    Heuristic rules:
+    - Ignore non-string values.
+    - Don't prefix if the image already starts with 'docker.io/'.
+    - Don't prefix if the first path component (before '/') contains a '.' or ':' (looks like a registry) or is 'localhost'.
+    - Otherwise prefix.
+    """
+    try:
+        if not image or not isinstance(image, str):
+            return False
+        if image.startswith("docker.io/"):
+            return False
+        # Split first component
+        parts = image.split("/", 1)
+        first = parts[0]
+        # If there's no slash, it's an implicit docker hub image -> prefix
+        if len(parts) == 1:
+            return True
+        # If first component looks like a registry (contains '.' or ':' or is 'localhost'), don't prefix
+        if "." in first or ":" in first or first == "localhost":
+            return False
+        return True
+    except Exception:
+        return False
 
 def main() -> int:
     parser = argparse.ArgumentParser(
@@ -121,6 +147,11 @@ def main() -> int:
     for svc_name, svc in list(services.items()):
         if not isinstance(svc, dict):
             continue
+
+        # Prefix docker.io/ to bare images that reference Docker Hub implicitly
+        img = svc.get("image")
+        if img and isinstance(img, str) and should_prefix_docker_io(img):
+            svc["image"] = "docker.io/" + img
 
         # Remove depends_on reference to log
         depends = svc.get("depends_on")
