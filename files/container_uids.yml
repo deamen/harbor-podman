@@ -1,0 +1,13 @@
+core: 10000
+db: 999
+exporter: 10000
+jobservice: 10000
+log: 10000
+nginx: 10000
+portal: 10000
+prepare: null
+redis: 999
+registry: 10000
+registryctl: 10000
+standalone-db-migrator: null
+trivy-adapter: 10000
