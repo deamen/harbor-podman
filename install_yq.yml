@@ -46,7 +46,7 @@
         dest: "/tmp/yq/checksums"
         force: yes
       register: checksum_down
-    
+
     - name: download checksums_hashes_order file
       ansible.builtin.get_url:
         url: "{{ yq_checksums_hashes_order.browser_download_url }}"
