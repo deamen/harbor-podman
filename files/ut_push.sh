@@ -43,11 +43,11 @@ fi
 if [ ! -f "$HARBOR_YML" ]; then
     echo "WARNING: $HARBOR_YML not found; cannot read harbor_admin_password. Skipping image push."
 else
-    if ! command -v yq >/dev/null 2>&1; then
+    if ! command -v /usr/local/bin/yq >/dev/null 2>&1; then
         echo "ERROR: yq is required to parse $HARBOR_YML. Please install yq (https://mikefarah.gitbook.io/yq/) and try again."
         exit 1
     fi
-    harbor_admin_password=$(yq e '.harbor_admin_password' "$HARBOR_YML")
+    harbor_admin_password=$(/usr/local/bin/yq e '.harbor_admin_password' "$HARBOR_YML")
     if [ -z "$harbor_admin_password" ] || [ "$harbor_admin_password" = "null" ]; then
         echo "WARNING: harbor_admin_password is empty in $HARBOR_YML; skipping image push."
     else
