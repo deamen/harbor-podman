@@ -67,7 +67,7 @@ else
         max_retries=12
         delay=5
         pushed=0
-        for i in $(seq 1 $max_retries); do
+        for i in $(seq 1 "$max_retries"); do
             echo "Attempt $i/$max_retries: pushing $SRC_IMAGE -> $DST_IMAGE"
             if podman login 127.0.0.1 -u admin -p "$harbor_admin_password" --tls-verify=false; then
                 podman tag "$SRC_IMAGE" "$DST_IMAGE"
