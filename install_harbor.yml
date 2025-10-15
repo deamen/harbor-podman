@@ -24,6 +24,11 @@
         path: "{{ harbor_installer_dir }}/docker-compose.yml"
       register: harbor_compose_stat
 
+    - name: Check if harbor.yml.tmpl exists
+      ansible.builtin.stat:
+        path: "{{ harbor_installer_dir }}/harbor.yml.tmpl"
+      register: harbor_yml_tmpl_stat
+
     - name: Install podman packages
       ansible.builtin.package:
         name:
@@ -87,7 +92,7 @@
         owner: root
         group: root
         mode: preserve
-      when: not (harbor_installer_dir is directory and (harbor_installer_dir + '/harbor.yml.tmpl') is file)
+      when: not (harbor_yml_tmpl_stat is defined and harbor_yml_tmpl_stat.stat.exists)
 
     - name: Create harbor cert directory
       ansible.builtin.file:
