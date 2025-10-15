@@ -43,9 +43,12 @@ fi
 if [ ! -f "$HARBOR_YML" ]; then
     echo "WARNING: $HARBOR_YML not found; cannot read harbor_admin_password. Skipping image push."
 else
-    harbor_admin_password=$(sed -n 's/^[[:space:]]*harbor_admin_password:[[:space:]]*//p' "$HARBOR_YML" | sed 's/^"\(.*\)"$/\1/;s/^'"'"'\(.*\)'"'"'$/\1/')
-    harbor_admin_password=$(echo "$harbor_admin_password" | sed 's/^\s*//;s/\s*$//')
-    if [ -z "$harbor_admin_password" ]; then
+    if ! command -v yq >/dev/null 2>&1; then
+        echo "ERROR: yq is required to parse $HARBOR_YML. Please install yq (https://mikefarah.gitbook.io/yq/) and try again."
+        exit 1
+    fi
+    harbor_admin_password=$(yq e '.harbor_admin_password' "$HARBOR_YML")
+    if [ -z "$harbor_admin_password" ] || [ "$harbor_admin_password" = "null" ]; then
         echo "WARNING: harbor_admin_password is empty in $HARBOR_YML; skipping image push."
     else
         SRC_IMAGE="quay.io/deamen/alpine-base:latest"
