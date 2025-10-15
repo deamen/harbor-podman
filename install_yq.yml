@@ -1,0 +1,97 @@
+---
+- name: Install Harbor
+  hosts: localhost
+  connection: local
+  become: false
+  tasks:
+    - name: Ensure temporary download directory exists
+      ansible.builtin.file:
+        path: /tmp/yq
+        state: directory
+        mode: '0755'
+
+    - name: Check the yq release info from GitHub
+      ansible.builtin.uri:
+        url: https://api.github.com/repos/mikefarah/yq/releases/tags/v4.48.1
+        method: GET
+        return_content: yes
+        status_code: 200
+        body_format: json
+      register: result
+
+    - name: Extract yq_linux_amd64 asset URL and digest file URL
+      set_fact:
+        # Pick the linux amd64 binary and the checksums asset from the release JSON
+        yq_asset: "{{ (result.json.assets | selectattr('name','equalto','yq_linux_amd64') | list).0 }}"
+        yq_checksums_asset: "{{ (result.json.assets | selectattr('name','equalto','checksums') | list).0 }}"
+        yq_checksums_hashes_order: "{{ (result.json.assets | selectattr('name','equalto','checksums_hashes_order') | list).0 }}"
+        yq_extract_checksum_sh: "{{ (result.json.assets | selectattr('name','equalto','extract-checksum.sh') | list).0 }}"
+
+    - name: Download yq binary
+      ansible.builtin.get_url:
+        url: "{{ yq_asset.browser_download_url }}"
+        dest: "/tmp/yq/{{ yq_asset.name }}"
+        mode: '0755'
+        force: yes
+      register: downloaded
+
+    - name: Compute sha256sum of downloaded binary
+      ansible.builtin.command:
+        cmd: "sha256sum /tmp/yq/{{ yq_asset.name }}"
+      register: sha_out
+
+    - name: Download checksums file
+      ansible.builtin.get_url:
+        url: "{{ yq_checksums_asset.browser_download_url }}"
+        dest: "/tmp/yq/checksums"
+        force: yes
+      register: checksum_down
+    
+    - name: download checksums_hashes_order file
+      ansible.builtin.get_url:
+        url: "{{ yq_checksums_hashes_order.browser_download_url }}"
+        dest: "/tmp/yq/checksums_hashes_order"
+        force: yes
+      register: checksum_order_down
+
+    - name: Download extract-checksum.sh file
+      ansible.builtin.get_url:
+        url: "{{ yq_extract_checksum_sh.browser_download_url }}"
+        dest: "/tmp/yq/extract-checksum.sh"
+        mode: '0755'
+        force: yes
+      register: extract_checksum_down
+
+    - name: Run extract-checksum.sh to get SHA-256 for the asset
+      ansible.builtin.command:
+        cmd: "/tmp/yq/extract-checksum.sh SHA-256 {{ yq_asset.name }}"
+      args:
+        chdir: /tmp/yq
+      register: extract_script_out
+      changed_when: false
+
+    - name: Set expected_sha from script output if present
+      set_fact:
+        expected_sha: "{{ (extract_script_out.stdout.split()[1]) if (extract_script_out.stdout is defined and extract_script_out.stdout | length > 0) else '' }}"
+      when: extract_script_out.stdout is defined and extract_script_out.stdout != ""
+
+    - name: Assert sha256 matches expected digest
+      ansible.builtin.assert:
+        that:
+          - "sha_out.stdout.split()[0] == expected_sha"
+        fail_msg: "Downloaded yq checksum does not match expected SHA256"
+        success_msg: "yq checksum verified"
+
+    - name: Move verified binary to /usr/local/bin
+      become: true
+      ansible.builtin.copy:
+        src: "/tmp/yq/{{ yq_asset.name }}"
+        dest: "/usr/local/bin/yq"
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Purge temporary download directory
+      ansible.builtin.file:
+        path: /tmp/yq
+        state: absent
