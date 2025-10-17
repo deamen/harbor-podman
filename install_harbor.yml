@@ -2,9 +2,16 @@
 - name: Install Harbor
   hosts: localhost
   connection: local
-  become: true
+  become: false
   vars:
     harbor_version: "v2.14.0"
+    harbor_runas_user:
+      user: "vagrant"
+      group: "vagrant"
+      uid: 1000
+      gid: 1000
+      home_dir: "/home/vagrant"
+
     harbor_home_dir: "/opt/harbor"
     harbor_installer_url: "https://github.com/goharbor/harbor/releases/download/{{ harbor_version }}/harbor-online-installer-{{ harbor_version }}.tgz"
     harbor_installer_dir: "{{ harbor_home_dir }}/{{ harbor_version }}"
@@ -15,6 +22,42 @@
     ut_test: true  # Set to true to enable unit testing
 
   tasks:
+    - name: Ensure group harbor_runas_user exists with correct gid
+      ansible.builtin.group:
+        name: "{{ harbor_runas_user.group }}"
+        state: present
+        gid: "{{ harbor_runas_user.gid }}"
+      become: true
+
+    - name: Ensure harbor_runas_user user exists
+      ansible.builtin.user:
+        name: "{{ harbor_runas_user.user }}"
+        uid: "{{ harbor_runas_user.uid }}"
+        group: "{{ harbor_runas_user.group }}"
+        shell: "/bin/bash"
+        home: "{{ harbor_runas_user.home_dir }}"
+        state: present
+      become: true
+    ##
+    # This should allow user's systemd container to continue running after logout
+    ##
+    - name: Enable linger for harbor_runas_user
+      ansible.builtin.command:
+        cmd: "loginctl enable-linger {{ harbor_runas_user.user }}"
+      changed_when: false
+      become: true
+      become_user: "{{ harbor_runas_user.user }}"
+
+    - name: Set unprivileged port start to 80
+      become: true
+      ansible.posix.sysctl:
+        name: net.ipv4.ip_unprivileged_port_start
+        value: '80'
+        sysctl_set: true
+        state: present
+        sysctl_file: /etc/sysctl.d/00-sysctl-unprivileged-port.conf
+        reload: true
+
     - name: Check if harbor_home_dir exists
       ansible.builtin.stat:
         path: "{{ harbor_home_dir }}"
@@ -26,6 +69,7 @@
       register: harbor_compose_stat
 
     - name: Install podman packages
+      become: true
       ansible.builtin.package:
         name:
           - podman
@@ -43,17 +87,20 @@
       changed_when: false
       when: ut_test and (harbor_home_stat is defined and harbor_home_stat.stat.exists) and (harbor_compose_stat is defined and harbor_compose_stat.stat.exists)
 
-
     - name: Remove existing Harbor home directory
+      become: true
       ansible.builtin.file:
         path: "{{ harbor_home_dir }}"
         state: absent
       when: ut_test and (harbor_home_stat is defined and harbor_home_stat.stat.exists)
 
     - name: Create harbor directory with SELinux context
+      become: true
       ansible.builtin.file:
         path: "{{ item }}"
         state: directory
+        owner: "{{ harbor_runas_user.user }}"
+        group: "{{ harbor_runas_user.group }}"
         mode: "0755"
         setype: container_file_t
       loop:
@@ -62,12 +109,14 @@
         - "{{ harbor_config_dir }}"
 
     - name: Create harbor log directory with context
+      become: true
       ansible.builtin.file:
         path: "{{ harbor_log_dir }}"
         state: directory
         mode: "0755"
 
     - name: Set default SELinux fcontext for harbor_home_dir
+      become: true
       community.general.sefcontext:
         target: '{{ harbor_home_dir }}(/.*)?'
         setype: container_file_t
@@ -91,6 +140,7 @@
       register: harbor_yml_tmpl_stat
 
     - name: Copy extracted Harbor installer to installer dir
+      become: true
       ansible.builtin.copy:
         src: /tmp/harbor/
         dest: "{{ harbor_installer_dir }}/"
@@ -102,18 +152,21 @@
       when: not (harbor_yml_tmpl_stat is defined and harbor_yml_tmpl_stat.stat.exists)
 
     - name: Create harbor cert directory
+      become: true
       ansible.builtin.file:
         path: "{{ harbor_cert_dir }}"
         state: directory
         mode: "0755"
 
     - name: Create harbor config directory
+      become: true
       ansible.builtin.file:
         path: "{{ harbor_config_dir }}"
         state: directory
         mode: "0755"
 
     - name: Copy harbor.yml.tmpl to harbor.yml
+      become: true
       ansible.builtin.copy:
         src: "{{ harbor_installer_dir }}/harbor.yml.tmpl"
         dest: "{{ harbor_installer_dir }}/harbor.yml"
@@ -121,48 +174,56 @@
         mode: "0644"
 
     - name: Update hostname in harbor.yml
+      become: true
       ansible.builtin.lineinfile:
         path: "{{ harbor_installer_dir }}/harbor.yml"
         regexp: '^hostname:.*'
         line: "hostname: {{ ansible_hostname }}"
 
     - name: Update log location in harbor.yml
+      become: true
       ansible.builtin.lineinfile:
         path: "{{ harbor_installer_dir }}/harbor.yml"
         regexp: '^    location:.*'
         line: "    location: {{ harbor_log_dir }}"
 
     - name: Update data_volume in harbor.yml
+      become: true
       ansible.builtin.lineinfile:
         path: "{{ harbor_installer_dir }}/harbor.yml"
         regexp: '^data_volume:.*'
         line: "data_volume: {{ harbor_data_dir }}"
 
     - name: Update certificate path in harbor.yml
+      become: true
       ansible.builtin.lineinfile:
         path: "{{ harbor_installer_dir }}/harbor.yml"
         regexp: '^  certificate:.*'
         line: "  certificate: {{ harbor_cert_dir }}/harbor.crt"
 
     - name: Update private_key path in harbor.yml
+      become: true
       ansible.builtin.lineinfile:
         path: "{{ harbor_installer_dir }}/harbor.yml"
         regexp: '^  private_key:.*'
         line: "  private_key: {{ harbor_cert_dir }}/harbor.key"
 
     - name: Update harbor_admin_password in harbor.yml
+      become: true
       ansible.builtin.lineinfile:
         path: "{{ harbor_installer_dir }}/harbor.yml"
         regexp: '^harbor_admin_password:.*'
         line: "harbor_admin_password: \"{{ lookup('pipe', 'openssl rand -base64 30') }}\""
 
     - name: Update database password in harbor.yml
+      become: true
       ansible.builtin.lineinfile:
         path: "{{ harbor_installer_dir }}/harbor.yml"
         regexp: '^  password:.*'
         line: "  password: \"{{ lookup('pipe', 'openssl rand -base64 30') }}\""
 
     - name: Ensure 'patch' utility is installed
+      become: true
       ansible.builtin.package:
         name: patch
         state: present
@@ -181,17 +242,20 @@
         file: tasks/generate_cert_tasks.yml
       when: not (harbor_cert_stat.stat.exists and harbor_key_stat.stat.exists)
     - name: Patch common.sh to support podman
+      become: true
       ansible.posix.patch:
         src: "{{ playbook_dir }}/files/common_sh.patch"
         dest: "{{ harbor_installer_dir }}/common.sh"
 
     - name: Patch install.sh to support podman
+      become: true
       ansible.posix.patch:
         src: "{{ playbook_dir }}/files/install_sh.patch"
         dest: "{{ harbor_installer_dir }}/install.sh"
         ignore_whitespace: true
 
     - name: Replace prepare image path to include docker.io
+      become: true
       ansible.builtin.replace:
         path: "{{ harbor_installer_dir }}/prepare"
         regexp: 'goharbor/prepare:{{ harbor_version }} prepare \$@'
@@ -199,6 +263,7 @@
         backup: true
 
     - name: Comment out Harbor start lines in install.sh (creates a backup)
+      become: true
       ansible.builtin.replace:
         path: "{{ harbor_installer_dir }}/install.sh"
         regexp: '^\s*(h2 "\[Step \$item\]: starting Harbor \.\.\."|\$DOCKER_COMPOSE up -d)'
@@ -206,12 +271,14 @@
         backup: true
 
     - name: Run Harbor installer script
+      become: true
       ansible.builtin.command:
         cmd: "./install.sh --with-trivy --with-podman"
         chdir: "{{ harbor_installer_dir }}/"
       changed_when: false
 
     - name: Patch docker-compose.yml for podman logging
+      become: true
       ansible.builtin.command:
         cmd: >-
           python3 {{ playbook_dir }}/files/patch_compose.py
@@ -224,10 +291,37 @@
       changed_when: "'Patched compose file' in (patch_compose_result.stdout | default(''))"
 
     - name: Restore SELinux context to files under harbor_home_dir
+      become: true
       ansible.builtin.command:
         cmd: "restorecon -R -v '{{ harbor_home_dir }}'"
       register: restorecon_result
-      changed_when: restorecon_result.rc == 0 and (restorecon_result.stdout | default('')) != ''
+      changed_when: restorecon_result.rc == 0 and restorecon_result.stdout != ''
+
+    - name: Ensure ownership of harbor_home_dir to harbor_runas_user
+      ansible.builtin.file:
+        path: "{{ harbor_home_dir }}"
+        owner: "{{ harbor_runas_user.user }}"
+        group: "{{ harbor_runas_user.group }}"
+        mode: "0755"
+        recurse: true
+        state: directory
+      become: true
+
+    - name: Pull required images with podman
+      ansible.builtin.command:
+        cmd: "podman compose pull"
+        chdir: "{{ harbor_installer_dir }}/"
+      register: podman_pull_result
+      changed_when: "'Pulling' in podman_pull_result.stdout"
+      become: true
+      become_user: "{{ harbor_runas_user.user }}"
+
+    - name: Fix mount permissins
+      ansible.builtin.script:
+        cmd: "files/fix_mount_perms.py -c {{ harbor_installer_dir }}/docker-compose.yml"
+      changed_when: false
+      become: true
+      become_user: "{{ harbor_runas_user.user }}"
 
     - name: Start Harbor with podman compose
       ansible.builtin.command:
@@ -236,6 +330,8 @@
       register: podman_compose_result
       failed_when: podman_compose_result.rc != 0
       changed_when: false
+      become: true
+      become_user: "{{ harbor_runas_user.user }}"
 
     - name: Run unit test image push script
       ansible.builtin.command:
@@ -244,4 +340,6 @@
       register: ut_push_result
       failed_when: false
       changed_when: "'Image pushed successfully' in (ut_push_result.stdout | default(''))"
+      become: true
+      become_user: "{{ harbor_runas_user.user }}"
       when: ut_test

@@ -6,6 +6,7 @@
     mode: '0755'
 
 - name: Run gen_cert.sh to create cert and key
+  become: true
   ansible.builtin.command:
     cmd: "{{ playbook_dir }}/files/gen_cert.sh -out '{{ harbor_cert_dir }}/harbor.crt' -keyout '{{ harbor_cert_dir }}/harbor.key'"
   changed_when: true
